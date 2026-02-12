@@ -419,11 +419,25 @@ class GameDevelopmentChain:
                         # Use fix_code for targeted fixes with full context
                         function_names = patcher.extract_function_names_from_issues(validation_result.issues)
                         if function_names:
-                            fix_instructions = "\n".join([
-                                f"- Fix {fn}: {issue_map.get(fn, {}).get('issue', 'Fix this function')} → {issue_map.get(fn, {}).get('fix', 'Implement properly')}"
-                                for fn in function_names
-                                for issue_map in [{fn: issue for issue in validation_result.issues if fn in issue.get('location', '')}]
-                            ])
+                            targeted = []
+                            for fn in function_names:
+                                matched_issue = next(
+                                    (
+                                        issue for issue in validation_result.issues
+                                        if fn.lower() in str(issue.get('location', '')).lower()
+                                        or fn.lower() in str(issue.get('issue', '')).lower()
+                                        or fn.lower() in str(issue.get('fix', '')).lower()
+                                    ),
+                                    None,
+                                )
+                                if matched_issue:
+                                    targeted.append(
+                                        f"- Fix {fn}: {matched_issue.get('issue', 'Fix this function')} → {matched_issue.get('fix', 'Implement properly')}"
+                                    )
+                                else:
+                                    targeted.append(f"- Fix {fn}: Ensure this function is fully implemented and callable")
+
+                            fix_instructions = "\n".join(targeted)
                             if not fix_instructions.strip():
                                 fix_instructions = self._format_fix_instructions(validation_result.issues)
                             
