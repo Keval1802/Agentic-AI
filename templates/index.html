@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic AI Game Developer</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-light: #818cf8;
+            --primary-dark: #4f46e5;
+            --secondary: #06b6d4;
+            --accent: #f59e0b;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+
+            --bg-dark: #0f0f23;
+            --bg-card: rgba(30, 30, 60, 0.6);
+            --bg-input: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+            --border-focus: rgba(99, 102, 241, 0.5);
+
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --text-bright: #f1f5f9;
+
+            --radius: 16px;
+            --radius-sm: 8px;
+            --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            --glow: 0 0 40px rgba(99, 102, 241, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Animated background */
+        .bg-pattern {
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(6, 182, 212, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(245, 158, 11, 0.05) 0%, transparent 50%);
+            animation: bgPulse 20s ease-in-out infinite;
+            z-index: -1;
+        }
+
+        @keyframes bgPulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        /* Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            gap: 2rem;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+
+        .logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .logo-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            box-shadow: var(--glow);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-bright), var(--primary-light));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: var(--text-dim);
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 160px;
+            padding: 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 1rem;
+            resize: vertical;
+            transition: all 0.2s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        }
+
+        textarea::placeholder {
+            color: var(--text-dim);
+        }
+
+        /* Checkbox Options */
+        .options-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .option {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .option:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .option input {
+            display: none;
+        }
+
+        .option.active {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.15);
+        }
+
+        .option-check {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .option.active .option-check {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .option.active .option-check::after {
+            content: '✓';
+            color: white;
+            font-size: 12px;
+        }
+
+        .option-label {
+            font-size: 0.9rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.875rem 1.5rem;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-input);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Pipeline Progress */
+        .pipeline {
+            margin-top: 2rem;
+        }
+
+        .pipeline-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .pipeline-title {
+            font-weight: 600;
+            color: var(--text-dim);
+        }
+
+        .pipeline-steps {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-input);
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            transition: all 0.3s;
+        }
+
+        .step.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--primary-light);
+        }
+
+        .step.completed {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        .step.failed {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .step-icon {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--primary-light);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Preview Section */
+        .preview-container {
+            position: relative;
+            background: #0a0a1a;
+            border-radius: var(--radius);
+            overflow: hidden;
+            min-height: 500px;
+        }
+
+        .preview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .preview-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .preview-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .preview-dot.red {
+            background: #ef4444;
+        }
+
+        .preview-dot.yellow {
+            background: #f59e0b;
+        }
+
+        .preview-dot.green {
+            background: #10b981;
+        }
+
+        .preview-url {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.375rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .preview-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .preview-btn {
+            padding: 0.375rem 0.75rem;
+            background: var(--bg-input);
+            border: none;
+            border-radius: 4px;
+            color: var(--text-dim);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preview-btn:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .preview-frame {
+            width: 100%;
+            height: 450px;
+            border: none;
+            background: white;
+        }
+
+        .preview-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 450px;
+            color: var(--text-dim);
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .preview-placeholder-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        /* Quality Badge */
+        .quality-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 20px;
+            color: var(--success);
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .quality-badge.warning {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.3);
+            color: var(--warning);
+        }
+
+        /* Recent Games */
+        .recent-section {
+            margin-top: 2rem;
+        }
+
+        .recent-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .recent-title {
+            font-weight: 600;
+        }
+
+        .games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .game-card {
+            padding: 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .game-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .game-title {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .game-meta {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        /* Status message */
+        .status-message {
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .status-message.error {
+            display: block;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+
+        .status-message.success {
+            display: block;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-dim);
+            font-size: 0.875rem;
+        }
+
+        .footer a {
+            color: var(--primary-light);
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-pattern"></div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">🎮</div>
+                <h1>Agentic AI Game Developer</h1>
+            </div>
+            <p class="subtitle">Multi-agent pipeline: Plan → Design → Code → Validate</p>
+        </header>
+
+        <div class="main-grid">
+            <!-- Input Panel -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">✨</div>
+                    <span class="card-title">Create Your Game</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="prompt">Describe Your Game</label>
+                    <textarea id="prompt"
+                        placeholder="Example: Create a classic Snake game with power-ups, increasing speed, and a retro neon theme. Include pause functionality, high score tracking, and smooth animations."></textarea>
+                </div>
+
+                <div class="options-grid">
+                    <label class="option active" id="opt-design">
+                        <input type="checkbox" id="include-design" checked>
+                        <span class="option-check"></span>
+                        <span class="option-label">🎨 Design Phase</span>
+                    </label>
+                    <label class="option active" id="opt-validate">
+                        <input type="checkbox" id="include-validation" checked>
+                        <span class="option-check"></span>
+                        <span class="option-label">✅ Validation</span>
+                    </label>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="generate-btn" onclick="generateGame()">
+                        <span>🚀</span>
+                        <span>Generate Game</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="generateGame(true)">
+                        <span>⚡</span>
+                        <span>Quick Mode</span>
+                    </button>
+                </div>
+
+                <div id="status-message" class="status-message"></div>
+
+                <!-- Pipeline Progress -->
+                <div class="pipeline" id="pipeline" style="display: none;">
+                    <div class="pipeline-header">
+                        <span class="pipeline-title">Generation Pipeline</span>
+                        <span id="pipeline-time"></span>
+                    </div>
+                    <div class="pipeline-steps">
+                        <div class="step" id="step-plan">
+                            <span class="step-icon">📋</span>
+                            <span>Plan</span>
+                        </div>
+                        <div class="step" id="step-design">
+                            <span class="step-icon">🎨</span>
+                            <span>Design</span>
+                        </div>
+                        <div class="step" id="step-code">
+                            <span class="step-icon">💻</span>
+                            <span>Code</span>
+                        </div>
+                        <div class="step" id="step-validate">
+                            <span class="step-icon">✅</span>
+                            <span>Validate</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview Panel -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🖥️</div>
+                    <span class="card-title">Game Preview</span>
+                    <div id="quality-badge" class="quality-badge" style="display: none; margin-left: auto;">
+                        <span>Quality:</span>
+                        <strong id="quality-score">--</strong>
+                    </div>
+                </div>
+
+                <div class="preview-container">
+                    <div class="preview-header">
+                        <div class="preview-dots">
+                            <span class="preview-dot red"></span>
+                            <span class="preview-dot yellow"></span>
+                            <span class="preview-dot green"></span>
+                        </div>
+                        <div class="preview-url" id="preview-url">No game loaded</div>
+                        <div class="preview-actions">
+                            <button class="preview-btn" id="btn-open" onclick="openGame()" style="display: none;">
+                                Open ↗
+                            </button>
+                            <button class="preview-btn" id="btn-download" onclick="downloadGame()"
+                                style="display: none;">
+                                Download ↓
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="preview-placeholder" class="preview-placeholder">
+                        <div class="preview-placeholder-icon">🎮</div>
+                        <p>Your game will appear here</p>
+                        <p style="font-size: 0.85rem; margin-top: 0.5rem;">Describe your game idea and click Generate
+                        </p>
+                    </div>
+
+                    <iframe id="game-preview" class="preview-frame" style="display: none;"></iframe>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Games -->
+        <div class="recent-section" id="recent-section">
+            <div class="recent-header">
+                <span class="recent-title">📁 Recent Games</span>
+                <button class="btn btn-secondary" onclick="loadRecentGames()"
+                    style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+                    Refresh
+                </button>
+            </div>
+            <div class="games-grid" id="games-grid"></div>
+        </div>
+
+        <footer class="footer">
+            <p>Powered by <a href="#">Google Gemini</a> • Multi-Agent Architecture v2.0</p>
+        </footer>
+    </div>
+
+    <script>
+        // State
+        let currentGameUrl = null;
+        let startTime = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRecentGames();
+            setupOptions();
+        });
+
+        // Option toggles
+        function setupOptions() {
+            document.querySelectorAll('.option').forEach(opt => {
+                opt.addEventListener('click', function () {
+                    const checkbox = this.querySelector('input');
+                    checkbox.checked = !checkbox.checked;
+                    this.classList.toggle('active', checkbox.checked);
+                });
+            });
+        }
+
+        // Generate game
+        let eventSource = null;
+        let timeInterval = null;
+        let currentSessionId = null;
+
+        async function generateGame(quickMode = false) {
+            const prompt = document.getElementById('prompt').value.trim();
+            if (!prompt) {
+                showStatus('Please describe your game first!', 'error');
+                return;
+            }
+
+            if (prompt.length > 2000) {
+                showStatus('Prompt is too long! Maximum 2000 characters.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('generate-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Generating...';
+
+            // Generate a unique session ID for progress tracking
+            currentSessionId = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+            startTime = Date.now();
+            showPipeline(true, quickMode);
+            hideStatus();
+
+            // Start real-time progress updates via SSE (with session isolation)
+            startSSEProgress(currentSessionId);
+
+            // Start timer update
+            timeInterval = setInterval(() => {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                document.getElementById('pipeline-time').textContent = elapsed + 's';
+            }, 100);
+
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        include_design: !quickMode && document.getElementById('include-design').checked,
+                        include_validation: !quickMode && document.getElementById('include-validation').checked,
+                        quick_mode: quickMode,
+                        session_id: currentSessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                // Stop SSE and timer
+                stopSSEProgress();
+
+                if (data.success) {
+                    currentGameUrl = data.game_url;
+                    showGame(data.game_url);
+                    showQuality(data.quality_score, data.validation);
+                    updatePipelineComplete(data.steps_completed);
+                    showStatus(`Game generated in ${data.generation_time}s!`, 'success');
+                    loadRecentGames();
+                } else {
+                    showStatus('❌ ' + (data.error || 'Failed to generate game'), 'error');
+                    updatePipelineFailed();
+                }
+            } catch (error) {
+                stopSSEProgress();
+                showStatus('❌ Error: ' + error.message, 'error');
+                updatePipelineFailed();
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🚀</span><span>Generate Game</span>';
+                currentSessionId = null;
+            }
+        }
+
+        // SSE Real-time progress (per-session)
+        function startSSEProgress(sessionId) {
+            eventSource = new EventSource('/api/progress?session_id=' + encodeURIComponent(sessionId));
+
+            eventSource.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                const stepName = data.name.toLowerCase();
+
+                console.log('SSE Progress:', data);
+
+                // Map step names to button IDs
+                let buttonId = null;
+                if (stepName.includes('plan')) buttonId = 'plan';
+                else if (stepName.includes('design')) buttonId = 'design';
+                else if (stepName.includes('cod')) buttonId = 'code';
+                else if (stepName.includes('valid')) buttonId = 'validate';
+
+                if (buttonId) {
+                    if (data.status === 'running') {
+                        // Mark previous steps as complete
+                        const steps = ['plan', 'design', 'code', 'validate'];
+                        const currentIdx = steps.indexOf(buttonId);
+                        for (let i = 0; i < currentIdx; i++) {
+                            setStepComplete(steps[i]);
+                        }
+                        setStepActive(buttonId);
+                    } else if (data.status === 'completed') {
+                        setStepComplete(buttonId);
+                    }
+                }
+            };
+
+            eventSource.onerror = function () {
+                // Connection closed or error - this is normal when generation completes
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            };
+        }
+
+        function stopSSEProgress() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            if (timeInterval) {
+                clearInterval(timeInterval);
+                timeInterval = null;
+            }
+        }
+
+        // Show game preview
+        function showGame(url) {
+            currentGameUrl = url; // Update global state
+            document.getElementById('preview-placeholder').style.display = 'none';
+            const iframe = document.getElementById('game-preview');
+            iframe.style.display = 'block';
+            iframe.src = url;
+            document.getElementById('preview-url').textContent = url;
+            document.getElementById('btn-open').style.display = 'block';
+            document.getElementById('btn-download').style.display = 'block';
+        }
+
+        // Show quality badge
+        function showQuality(score, validation) {
+            const badge = document.getElementById('quality-badge');
+            const scoreEl = document.getElementById('quality-score');
+
+            if (score !== null && score !== undefined) {
+                badge.style.display = 'flex';
+                scoreEl.textContent = score + '/100';
+                badge.className = 'quality-badge' + (score < 70 ? ' warning' : '');
+            }
+        }
+
+        // Pipeline UI
+        function showPipeline(show, quickMode = false) {
+            const pipeline = document.getElementById('pipeline');
+            pipeline.style.display = show ? 'block' : 'none';
+
+            // Reset all steps
+            ['plan', 'design', 'code', 'validate'].forEach((step, i) => {
+                const el = document.getElementById('step-' + step);
+                el.className = 'step';
+                el.querySelector('.step-icon').innerHTML = ['📋', '🎨', '💻', '✅'][i];
+            });
+
+            // Skip design/validate in quick mode
+            if (quickMode) {
+                document.getElementById('step-design').style.opacity = '0.3';
+                document.getElementById('step-validate').style.opacity = '0.3';
+            } else {
+                document.getElementById('step-design').style.opacity = '1';
+                document.getElementById('step-validate').style.opacity = '1';
+            }
+
+            // Start first step
+            if (show) {
+                setStepActive('plan');
+            }
+        }
+
+        function setStepActive(stepName) {
+            const el = document.getElementById('step-' + stepName);
+            el.className = 'step active';
+            el.querySelector('.step-icon').innerHTML = '<div class="spinner"></div>';
+        }
+
+        function setStepComplete(stepName) {
+            const el = document.getElementById('step-' + stepName);
+            el.className = 'step completed';
+            el.querySelector('.step-icon').innerHTML = '✓';
+        }
+
+        function updatePipelineComplete(steps) {
+            steps.forEach(step => {
+                const name = step.toLowerCase();
+                if (name.includes('plan')) setStepComplete('plan');
+                if (name.includes('design')) setStepComplete('design');
+                if (name.includes('code')) setStepComplete('code');
+                if (name.includes('valid') || name.includes('complete')) setStepComplete('validate');
+            });
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            document.getElementById('pipeline-time').textContent = elapsed + 's';
+        }
+
+        function updatePipelineFailed() {
+            ['plan', 'design', 'code', 'validate'].forEach(step => {
+                const el = document.getElementById('step-' + step);
+                if (el.classList.contains('active')) {
+                    el.className = 'step failed';
+                    el.querySelector('.step-icon').innerHTML = '✗';
+                }
+            });
+        }
+
+        // Status messages
+        function showStatus(message, type) {
+            const el = document.getElementById('status-message');
+            el.textContent = message;
+            el.className = 'status-message ' + type;
+        }
+
+        function hideStatus() {
+            document.getElementById('status-message').className = 'status-message';
+        }
+
+        // Actions
+        function openGame() {
+            if (currentGameUrl) {
+                window.open(currentGameUrl, '_blank');
+            }
+        }
+
+        function downloadGame() {
+            if (currentGameUrl) {
+                const a = document.createElement('a');
+                a.href = currentGameUrl;
+                a.download = currentGameUrl.split('/').pop();
+                a.click();
+            }
+        }
+
+        // Load recent games
+        async function loadRecentGames() {
+            try {
+                const response = await fetch('/api/games');
+                const data = await response.json();
+
+                const grid = document.getElementById('games-grid');
+                grid.innerHTML = '';
+
+                if (data.games.length === 0) {
+                    grid.innerHTML = '<p style="color: var(--text-dim); grid-column: 1/-1;">No games generated yet</p>';
+                    return;
+                }
+
+                data.games.slice(0, 8).forEach(game => {
+                    const card = document.createElement('div');
+                    card.className = 'game-card';
+                    card.onclick = () => showGame(game.url);
+                    card.innerHTML = `
+                        <div class="game-title">${game.id}</div>
+                        <div class="game-meta">${game.size_kb || '?'} KB • ${new Date(game.created).toLocaleDateString()}</div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Failed to load games:', error);
+            }
+        }
+    </script>
+</body>
+
+</html>

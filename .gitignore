@@ -1,0 +1,51 @@
+# Environment variables (API keys!)
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Debug output files (written by parser/coder)
+html.txt
+css.txt
+js.txt
+coder_raw_output.txt
+game_coding_dataset.jsonl
+game_coding_dataset_deduped.jsonl
+test_validator_json.py
+test_nvidia_json.py
+test_visual.py
+test_visual_final.py
+test_nvidia_api.py
+nvidia_test_game.html
+Untitled-1.txt
+# Temp game files
+temp_games/
+
+# Logs
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated games
+static/generated/
+
+# Models
+model/
