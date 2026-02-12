@@ -206,32 +206,51 @@ class FunctionPatcher:
         return new_code
     
     def extract_function_names_from_issues(self, issues: List[Dict]) -> List[str]:
+        """Extract likely function names from validator issue payloads.
+
+        Communication loophole fixed:
+        - Validator often reports the function name in `issue` or `fix`, not only `location`.
+        - If we only inspect `location`, surgical patching is skipped and we fall back to full
+          regeneration loops.
         """
-        Extract function names from validator issue locations.
-        E.g., "<script> tag → isValidMove() method" → "isValidMove"
-        """
-        function_names = []
-        
+        function_names: List[str] = []
+
+        # Match: someFn(), this.someFn(), "Define someFn()", "Fix someFn method".
+        patterns = [
+            r'(?:this\.)?(\w+)\s*\(\)',
+            r'\bdefine\s+(\w+)\b',
+            r'\bfix\s+(\w+)\b',
+            r'\b(\w+)\s+method\b',
+            r'\b(\w+)\s+function\b',
+            r'→\s*(\w+)\s*\(',
+        ]
+
+        stop_words = {
+            'function', 'method', 'script', 'javascript', 'html', 'css', 'code',
+            'this', 'game', 'line', 'referenceerror', 'fix', 'define'
+        }
+
         for issue in issues:
-            location = issue.get('location', '')
-            
-            # Pattern to find function names in location strings
-            # Matches: functionName(), functionName, someFunction() method
-            patterns = [
-                r'(\w+)\s*\(\)',      # functionName()
-                r'→\s*(\w+)\s*\(',     # → functionName(
-                r'(\w+)\s+method',     # functionName method
-                r'(\w+)\s+function',   # functionName function
+            # Check all relevant channels where validator may mention function identifiers.
+            candidate_texts = [
+                str(issue.get('location', '')),
+                str(issue.get('issue', '')),
+                str(issue.get('fix', '')),
             ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, location)
-                if match:
-                    name = match.group(1)
-                    if name not in function_names and name not in ['function', 'method', 'script']:
-                        function_names.append(name)
-                    break
-        
+
+            for text in candidate_texts:
+                for pattern in patterns:
+                    for match in re.findall(pattern, text, flags=re.IGNORECASE):
+                        name = str(match).strip()
+                        if (
+                            len(name) < 2
+                            or name.lower() in stop_words
+                            or not re.match(r'^[A-Za-z_]\w*$', name)
+                        ):
+                            continue
+                        if name not in function_names:
+                            function_names.append(name)
+
         return function_names
     
     def save_temp_file(self, code: str, prefix: str = "game") -> Path:
