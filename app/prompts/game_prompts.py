@@ -25,6 +25,7 @@ BASE_RULES = """
 ## OUTPUT FORMAT:
 - Provide THREE code blocks: HTML, CSS, and JavaScript
 - NO explanatory text, ONLY code
+- ZERO explanations, ZERO reasoning, ZERO thinking — output ONLY code
 - HTML block must start with <!DOCTYPE html>
 """
 

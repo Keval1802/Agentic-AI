@@ -128,11 +128,11 @@ class GameDevelopmentChain:
         # Planner: llama-3.3-70b-versatile (best reasoning)
         # Designer: llama-3.1-8b-instant (fast)
         # Coder: qwen/qwen3-32b (excellent for code)
-        # Validator: openai/gpt-oss-120b (best bug detection)
+        # Validator: qwen/qwen3-32b (unified reasoning architecture)
         self.planner = PlannerAgent()
         self.designer = DesignerAgent() if include_design_step else None
         self.coder = CoderAgent(model="qwen/qwen3-32b")
-        self.validator = ValidatorAgent() if include_validation else None
+        self.validator = ValidatorAgent(model="qwen/qwen3-32b") if include_validation else None
         self.parser = GameCodeParser()
         
         # Initialize Visual Tester (browser + NVIDIA NIM)
@@ -283,12 +283,16 @@ class GameDevelopmentChain:
                         summary=vr.get("summary", "LangGraph validation complete")
                     )
                 
-                # Check for failure
-                if graph_result.get("status") == "failed" or not game_code:
+                # Even on failure/error, if we have code, proceed to save it
+                if graph_result.get("status") == "failed" and not game_code:
                     return self._error_result(
-                        graph_result.get("error", "LangGraph pipeline failed"),
+                        graph_result.get("error", "LangGraph pipeline failed - no code generated"),
                         start_time
                     )
+                
+                # If there was an error but we DO have code, log it and continue
+                if graph_result.get("error"):
+                    print(f"⚠️ Graph had error but code exists ({len(game_code)} chars). Proceeding to save.")
                 
                 self._notify_progress(PipelineStep(
                     name="Coding",
@@ -644,23 +648,33 @@ class GameDevelopmentChain:
         return "\n".join([f"- [{i.get('severity', 'issue')}] {i.get('issue', '')}: {i.get('fix', '')}" for i in issues[:5]])
     
     def _format_fix_instructions(self, issues: list) -> str:
-        """Format validation issues as CONCISE fix instructions with EXACT LOCATIONS."""
+        """Format validation issues as XML fix instructions."""
         if not issues:
             return "No issues found."
         
-        instructions = ["## LOGIC ERRORS TO FIX:\n"]
+        xml_output = ["<validation_errors>"]
         
-        for idx, issue in enumerate(issues, 1):
-            location = issue.get('location', 'Unknown location')
-            problem = issue.get('issue', 'Unknown issue')
-            fix = issue.get('fix', 'Fix this')
+        for issue in issues:
+            loc = issue.get('location', 'Unknown')
+            line_str = str(issue.get('line', 'Unknown'))
             
-            instructions.append(f"""{idx}. **{location}**
-   - Problem: {problem}
-   - Fix: {fix}
-""")
+            # Try to infer line from location if it says "Line X"
+            if 'line' not in issue and 'Line' in loc:
+                 import re
+                 match = re.search(r'Line (\d+)', loc)
+                 if match:
+                     line_str = match.group(1)
+
+            xml_output.append(f"""  <error>
+    <type>{issue.get('severity', 'error')}</type>
+    <line>{line_str}</line>
+    <location>{loc}</location>
+    <description>{issue.get('issue', '')}</description>
+    <fix_suggestion>{issue.get('fix', '')}</fix_suggestion>
+  </error>""")
         
-        return "\n".join(instructions)
+        xml_output.append("</validation_errors>")
+        return "\n".join(xml_output)
     
     def _error_result(self, error: str, start_time) -> GameResult:
         """Create an error result."""

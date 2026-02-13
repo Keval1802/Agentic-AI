@@ -225,12 +225,24 @@ class CoderValidatorGraph:
 
     def _merge_code_memory(self, previous: Dict[str, str], patched: Dict[str, str]) -> Dict[str, str]:
         """Prefer patched JS but keep previous HTML/CSS when patch output is minimal."""
-        merged = {
-            "html": patched.get("html") or previous.get("html", ""),
-            "css": patched.get("css") or previous.get("css", ""),
-            "js": patched.get("js") or previous.get("js", ""),
-            "full": patched.get("full") or previous.get("full", ""),
-        }
+        if patched.get("html") and "<!doctype html>" in patched.get("html", "").lower():
+             # Single-file override!
+             # If the patch returned a full HTML file, it includes all CSS/JS inline.
+             # We must clear the separate CSS/JS memory to avoid double-injection or stale code.
+             merged = {
+                 "html": patched.get("html"),
+                 "css": "", 
+                 "js": "",
+                 "full": patched.get("full")
+             }
+        else:
+             # Legacy/Split-mode merge
+             merged = {
+                "html": patched.get("html") or previous.get("html", ""),
+                "css": patched.get("css") or previous.get("css", ""),
+                "js": patched.get("js") or previous.get("js", ""),
+                "full": patched.get("full") or previous.get("full", ""),
+             }
         return merged
 
     def _apply_placeholder_line_fixes(self, code_memory: Dict[str, str], issues: List[Dict[str, Any]]) -> tuple:
@@ -770,27 +782,29 @@ class CoderValidatorGraph:
         
         # Check iteration limit
         iteration = state.get("iteration", 1)
-        max_iter = state.get("max_iterations", self.MAX_ITERATIONS)
-        if max_iter is not None and iteration >= max_iter:
-            self._notify(f"⚠️ [Graph] Max iterations ({max_iter}) reached. Using best effort.")
+        # Default MAX_ITERATIONS is None, meaning infinite unless set. 
+        # But we should have a safety cap if not specified.
+        max_iter = state.get("max_iterations") or 15 
+        
+        if iteration >= max_iter:
+            self._notify(f"⚠️ [Graph] Max iterations ({max_iter}) reached. Stopping loop.")
             return "complete"  # Return what we have
         
-        # Check if only warnings remain (no critical issues) — accept the code
+        # Check if only warnings remain (no critical issues) — REFUSE TO ACCEPT
+        # User requested Zero Tolerance: "warning is also not acceptable"
         issues = state.get("issues", [])
         if issues:
-            has_critical = any(i.get("severity") == "critical" for i in issues)
-            if not has_critical:
-                self._notify(
-                    f"✅ [Graph] Only {len(issues)} warning(s) remain (no critical). "
-                    f"Accepting code with score {state.get('score', 0)}/100."
-                )
-                return "complete"
+            self._notify(
+                f"⚠️ [Graph] {len(issues)} issue(s) remain. Refusing to accept (Zero Tolerance)."
+            )
+            # Proceed to patch
+            return "patch"
         
         # Check stall detection
         stall_count = state.get("stall_count", 0)
         if stall_count >= self.MAX_STALLS:
-            self._notify(f"⚠️ [Graph] Stall detected ({stall_count} iterations without improvement). Stopping.")
-            return "complete"  # Return what we have
+            self._notify(f"⚠️ [Graph] Stall detected ({stall_count} iterations without improvement). Stopping force-ably.")
+            return "complete"  # Return what we have as a last resort
         
         # Continue patching
         return "patch"
@@ -801,7 +815,7 @@ class CoderValidatorGraph:
         self,
         game_plan: str,
         design_spec: str = "",
-        max_iterations: Optional[int] = None,
+        max_iterations: Optional[int] = 15,
         thread_id: str = "default"
     ) -> GraphState:
         """
@@ -840,26 +854,39 @@ class CoderValidatorGraph:
         }
         
         # Run the graph with checkpointing
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 150}
         
         self._notify(f"\n{'='*50}")
         self._notify(f"🚀 [Graph] Starting Coder-Validator Graph")
         self._notify(f"{'='*50}\n")
         
-        # Execute graph
+        # Execute graph — catch recursion limit gracefully
         final_state = None
-        for step in self.compiled_graph.stream(initial_state, config):
-            # step is a dict with node_name: output
-            for node_name, output in step.items():
-                if isinstance(output, dict):
-                    # Merge output into state tracking
-                    if "current_code" in output:
-                        final_state = output
+        try:
+            for step in self.compiled_graph.stream(initial_state, config):
+                # step is a dict with node_name: output
+                for node_name, output in step.items():
+                    if isinstance(output, dict):
+                        # Merge output into state tracking
+                        if "current_code" in output:
+                            final_state = output
+        except Exception as graph_err:
+            err_str = str(graph_err).lower()
+            if "recursion" in err_str or "recursion_limit" in err_str:
+                self._notify(f"⚠️ [Graph] Recursion limit reached. Returning best code so far.")
+            else:
+                self._notify(f"⚠️ [Graph] Error: {graph_err}. Returning best code so far.")
         
         # Get final state from checkpointer
         checkpoint = self.memory.get(config)
         if checkpoint and "channel_values" in checkpoint:
             final_state = checkpoint["channel_values"]
+        
+        # Fallback: if final_state is still None, return initial state with error
+        if final_state is None:
+            final_state = initial_state
+            final_state["status"] = "failed"
+            final_state["error"] = "Graph produced no output"
         
         self._notify(f"\n{'='*50}")
         self._notify(f"🏁 [Graph] Complete - Score: {final_state.get('score', 0)}/100")

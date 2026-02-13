@@ -67,6 +67,10 @@ List which animations to use and where:
 - Use EXACT values (hex colors, px sizes, seconds)
 - NO code, NO CSS blocks - just plain text instructions
 - 80–140 words max
+- ZERO explanations, ZERO reasoning, ZERO thinking — output ONLY the design spec
+- Design must feel PREMIUM and modern — glassmorphism, gradients, micro-animations, curated palettes
+
+/no_think
 """
 
 class DesignerAgent:

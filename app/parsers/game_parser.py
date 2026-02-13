@@ -98,16 +98,13 @@ class GameCodeParser:
         if not html:
             complete_html = self._extract_complete_html(llm_output)
             if complete_html:
-                style_matches = re.findall(r"<style[^>]*>(.*?)</style>", complete_html, re.DOTALL | re.IGNORECASE)
-                if style_matches and not css:
-                    css = "\n\n".join(m.strip() for m in style_matches if m.strip())
-                script_matches = re.findall(r"<script(?![^>]*\bsrc\b)[^>]*>(.*?)</script>", complete_html, re.DOTALL | re.IGNORECASE)
-                if script_matches and not js:
-                    js_parts = [m.strip() for m in script_matches if m.strip()]
-                    if js_parts:
-                        js = "\n\n".join(js_parts)
-                html = re.sub(r"<style[^>]*>.*?</style>", "", complete_html, flags=re.DOTALL | re.IGNORECASE)
-                html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+                # SINGLE FILE DETECTED: Keep it intact!
+                # Do NOT strip styles/scripts. Do NOT extract to separate vars.
+                html = complete_html
+                
+                # We can still populate metadata by inspecting (non-destructively)
+                self.metadata.has_css = "<style" in html.lower()
+                self.metadata.has_js = "<script" in html.lower()
 
         if not html and blocks:
             untagged = [b for (lang, b) in blocks if not lang]
@@ -120,15 +117,23 @@ class GameCodeParser:
                 elif self._looks_like_js(candidate):
                     js = candidate
 
-        if html and "<link" not in html.lower():
-            html = re.sub(
+        # Only inject external links if we actually have SEPARATE code and no inline equivalents
+        is_complete_doc = "<html" in html.lower()
+        has_inline_style = "<style" in html.lower()
+        has_inline_script = "<script" in html.lower()
+
+        # Inject CSS link only if we have CSS but no inline styles, and it's not already linked
+        if css and not has_inline_style and "<link" not in html.lower():
+             html = re.sub(
                 r"(</head>)",
                 '    <link rel="stylesheet" href="style.css">\n\\1',
                 html,
                 flags=re.IGNORECASE
             )
-        if html and 'src="script.js"' not in html.lower():
-            html = re.sub(
+            
+        # Inject JS script only if we have JS but no inline scripts, and it's not already linked
+        if js and not has_inline_script and 'src="script.js"' not in html.lower():
+             html = re.sub(
                 r"(</body>)",
                 '    <script src="script.js"></script>\n\\1',
                 html,
@@ -147,8 +152,8 @@ class GameCodeParser:
 
         return {
             "html": html or self._default_html(),
-            "css": css or "/* No styles generated */",
-            "js": js or "// No JavaScript generated",
+            "css": css, # Return empty if empty (don't inject comments)
+            "js": js,   # Return empty if empty
         }
 
     def _default_html(self) -> str:
@@ -200,6 +205,10 @@ class GameCodeParser:
 </html>'''
 
     def _inject_into_html(self, html: str, css: str, js: str) -> str:
+        # Remove external references since we are injecting inline
+        html = re.sub(r'<link[^>]*href=["\']style\.css["\'][^>]*>', '', html, flags=re.IGNORECASE)
+        html = re.sub(r'<script[^>]*src=["\']script\.js["\'][^>]*>\s*</script>', '', html, flags=re.IGNORECASE)
+
         if css and "<style" not in html.lower():
             style_tag = f"<style>\n{css}\n</style>"
             html = re.sub(r"</head>", f"{style_tag}\n</head>", html, flags=re.IGNORECASE)

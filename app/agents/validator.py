@@ -18,7 +18,7 @@ load_dotenv()
 
 VALIDATOR_PROMPT = """You are a STRICT game code reviewer. Find ALL bugs. ReferenceError = INSTANT FAIL.
 
-## Full Game Code:
+## Full Game Code (Single HTML File):
 {game_code}
 
 ## 🚨 ZERO TOLERANCE - REFERENCEERROR:
@@ -40,6 +40,7 @@ Review the code for:
 2. **Security**: XSS vulnerabilities, unsafe HTML injection.
 3. **Edge Cases**: Zero inputs, max inputs, window resizing, mobile touch support.
 4. **Completeness**: Are all planned features implemented?
+5. **Structure**: Is it a SINGLE valid HTML file with inline CSS (<style>) and JS (<script>)?
 
 ## OUTPUT FORMAT (JSON ONLY):
 You MUST return a valid JSON object. No markdown, no preambles.
@@ -85,6 +86,9 @@ class ValidatorAgent:
         """
         self.use_nvidia = os.getenv("USE_NVIDIA", "").lower() == "true" and os.getenv("NVIDIA_API_KEY")
         self.use_groq = use_groq and os.getenv("GROQ_API_KEY")
+
+        if model and model.startswith("qwen/"):
+             self.use_nvidia = False
         
         if self.use_nvidia:
             # PRIMARY: NVIDIA NIM with Nemotron Ultra 253B (Instruction Following King)
@@ -98,11 +102,11 @@ class ValidatorAgent:
             )
             print(f"🎯 ValidatorAgent using NVIDIA NIM: {self.model} (Instruction Following King)")
         elif self.use_groq:
-            # FALLBACK 1: Groq with GPT-OSS-120B
-            self.model = model or "openai/gpt-oss-120b"
+            # FALLBACK 1: Groq with Qwen 3 32B (as requested)
+            self.model = model or "qwen/qwen3-32b"
             self.llm = ChatGroq(
                 model=self.model,
-                api_key=os.getenv("GROQ_API_KEY"),
+                api_key=os.getenv("GROQ_API_KEY_2"),
                 temperature=0.1,
                 max_tokens=2048,
             )
@@ -155,9 +159,17 @@ class ValidatorAgent:
         code = re.sub(r'/\*.*?\*/', ' ', code, flags=re.DOTALL)
         code = re.sub(r'//.*', ' ', code)
         code = re.sub(r'"(?:\\.|[^"\\])*"', '""', code)
-        code = re.sub(r"'(?:\\.|[^'\\])*'", "''", code)
+        # Fix: handle single quotes better to avoid stripping contractions
+        code = re.sub(r"'(?:\\.|[^'\\])*'", "''", code) 
         code = re.sub(r'`(?:\\.|[^`])*`', '``', code, flags=re.DOTALL)
         return code
+
+    def _find_line_number(self, code: str, target: str) -> int:
+        """Find the first line number containing the target string."""
+        for idx, line in enumerate(code.splitlines(), 1):
+            if target in line:
+                return idx
+        return 0
     
     def _map_code_structure(self, code: str) -> Dict[str, int]:
         """
@@ -214,23 +226,31 @@ class ValidatorAgent:
         # Combine ALL issues
         all_issues = js_issues + html_issues + css_issues + line_issues + llm_result.get('issues', [])
         
-        # ReferenceError = INSTANT FAIL
-        ref_errors = [i for i in all_issues if 'referenceerror' in i.get('issue', '').lower() or 
-                       'referenceerror' in i.get('location', '').lower() or
-                       i.get('severity') == 'critical']
+        # Strict Mode: Zero Tolerance for both Critical Errors AND Warnings
+        # User feedback: "warning is also not acceptable"
         
-        critical_count = len(ref_errors)
-        is_valid = critical_count == 0 and len(js_code) > 200
+        # Count all issues equally
+        critical_count = len([i for i in all_issues if i.get('severity') == 'critical'])
+        warning_count = len([i for i in all_issues if i.get('severity') == 'warning'])
+        total_issues = len(all_issues)
         
-        # Score
-        score = 100 - (critical_count * 25) - (len(all_issues) * 5)
+        # FAIL if ANY issue exists (ReferenceError, Logic Error, OR Warning)
+        is_valid = total_issues == 0 and len(js_code) > 200
+        
+        # Score heavily penalized for ANY issue
+        # Previously warnings were -5, now they act like critical errors (-25)
+        score = 100 - (total_issues * 25)
         score = max(0, min(100, score))
         
+        summary = llm_result.get('summary', f'Found {total_issues} issues ({critical_count} critical, {warning_count} warnings)')
+        if not is_valid and total_issues > 0:
+            summary = f"FAILED: {summary} (Zero Tolerance Mode)"
+            
         return ValidationResult(
             is_valid=is_valid,
             score=score,
             issues=all_issues,
-            summary=llm_result.get('summary', f'Found {len(all_issues)} issues ({critical_count} critical)'),
+            summary=summary,
             fixed_code=None
         )
 
@@ -312,9 +332,17 @@ class ValidatorAgent:
             
             undefined_methods = called_methods - defined_methods - set(structure.keys())
             for method in undefined_methods:
+                # Find line number for the undefined method call
+                line_num = 0
+                for idx, line in enumerate(js_code.splitlines(), 1):
+                    if f"this.{method}(" in line:
+                        line_num = idx
+                        break
+                
                 issues.append({
                     'severity': 'critical',
-                    'location': f'JavaScript - this.{method}()',
+                    'location': f'JavaScript Line {line_num or "?"}',
+                    'line': line_num,
                     'issue': f'ReferenceError: Method this.{method}() is called but NEVER defined in the class',
                     'fix': f'Define {method}() method in the class or fix the method name'
                 })
@@ -330,16 +358,71 @@ class ValidatorAgent:
                 for prop in common_props:
                     if prop in this_props:
                         bare_pattern = rf'(?<!this\.)(?<!\w){prop}(?!\w)(?!\s*[=:])'
-                        code_without_constructor = js_code.replace(constructor_body, '')
-                        sanitized = self._strip_strings_and_comments(code_without_constructor)
-                        bare_uses = re.findall(bare_pattern, sanitized)
-                        if len(bare_uses) > 2:
+                        # Scan line-by-line relative to whole file
+                        for idx, line in enumerate(js_code.splitlines(), 1):
+                            # Skip constructor definition itself if needed, but simple check is okay
+                            if 'constructor' in line: continue
+                            
+                            # Remove strings/comments from line to avoid false positives
+                            clean_line = self._strip_strings_and_comments(line)
+                            if re.search(bare_pattern, clean_line):
+                                issues.append({
+                                    'severity': 'critical',
+                                    'location': f'JavaScript Line {idx}',
+                                    'line': idx,
+                                    'issue': f'ReferenceError: "{prop}" used without this. prefix - will crash at runtime',
+                                    'fix': f'Use this.{prop} instead of bare {prop} on line {idx}'
+                                })
+
+        # 4. Check for event listeners registered inside hot loops (update/draw/gameLoop)
+        loop_methods = ('update', 'draw', 'gameLoop', 'tick', 'loop', 'render')
+        in_loop_method = None
+        brace_depth = 0
+        for idx, line in enumerate(js_code.splitlines(), 1):
+            clean_line = self._strip_strings_and_comments(line)
+            method_match = re.match(r'^\s*(?:async\s+)?(' + '|'.join(loop_methods) + r')\s*\([^)]*\)\s*\{', clean_line)
+            if method_match:
+                in_loop_method = method_match.group(1)
+                brace_depth = clean_line.count('{') - clean_line.count('}')
+                continue
+            if in_loop_method:
+                brace_depth += clean_line.count('{') - clean_line.count('}')
+                if 'addEventListener' in clean_line:
+                    issues.append({
+                        'severity': 'critical',
+                        'location': f'JavaScript Line {idx}',
+                        'line': idx,
+                        'issue': f'Event listener registered inside {in_loop_method}() - will rebind every frame',
+                        'fix': 'Move addEventListener calls to constructor/init so they run once'
+                    })
+                if brace_depth <= 0:
+                    in_loop_method = None
+
+        # 5. Check for use-after-null on common state props
+        def _use_after_null(prop: str, window: int = 30) -> None:
+            lines = js_code.splitlines()
+            needle_assign = f"this.{prop} = null"
+            use_pattern = re.compile(rf'\bthis\.{prop}\s*\.')
+            assign_pattern = re.compile(rf'\bthis\.{prop}\s*=')
+            for idx, line in enumerate(lines, 1):
+                clean_line = self._strip_strings_and_comments(line)
+                if needle_assign in clean_line:
+                    for j in range(idx + 1, min(idx + window, len(lines)) + 1):
+                        look = self._strip_strings_and_comments(lines[j - 1])
+                        if assign_pattern.search(look):
+                            break
+                        if use_pattern.search(look):
                             issues.append({
                                 'severity': 'critical',
-                                'location': f'JavaScript - missing this.{prop}',
-                                'issue': f'ReferenceError: "{prop}" used without this. prefix ({len(bare_uses)} times) - will crash at runtime',
-                                'fix': f'Use this.{prop} instead of bare {prop} inside class methods'
+                                'location': f'JavaScript Line {j}',
+                                'line': j,
+                                'issue': f'Use-after-null: this.{prop} accessed after being set to null',
+                                'fix': f'Delay setting this.{prop} = null until after all uses, or reassign before access'
                             })
+                            break
+
+        _use_after_null('selectedPiece')
+        _use_after_null('sourceSquare')
         
         # ============ GENERAL JS CHECKS ============
         # Check for game loop
@@ -734,20 +817,21 @@ class ValidatorAgent:
                 })
         
         # Check for script and style links
-        if 'script.js' not in html_code and '<script' not in html_code.lower():
+        # Check for script and style (inline or external)
+        if '<script' not in html_code.lower():
             issues.append({
                 'severity': 'critical',
                 'location': 'HTML - Script',
-                'issue': 'ReferenceError: No script.js link or inline script found - game won\'t run',
-                'fix': 'Add <script src="script.js"></script> before </body>'
+                'issue': 'No <script> tags found - game logic missing',
+                'fix': 'Add <script>...</script> block with game logic'
             })
         
-        if 'style.css' not in html_code and '<style' not in html_code.lower():
+        if '<style' not in html_code.lower():
             issues.append({
                 'severity': 'warning',
                 'location': 'HTML - Stylesheet',
-                'issue': 'No style.css link or inline styles found',
-                'fix': 'Add <link rel="stylesheet" href="style.css"> in <head>'
+                'issue': 'No <style> tags found',
+                'fix': 'Add <style>...</style> block with CSS'
             })
         
         # Check for mismatched IDs between HTML and script references
@@ -936,9 +1020,19 @@ class ValidatorAgent:
         if hasattr(response, 'content'):
             content = response.content
             if isinstance(content, list):
-                return "\n".join(str(part) for part in content)
-            return str(content)
-        return str(response)
+                content = "\n".join(str(part) for part in content)
+            else:
+                 content = str(content)
+        else:
+             content = str(response)
+             
+        return self._strip_thinking_tokens(content)
+
+    def _strip_thinking_tokens(self, content: str) -> str:
+        """Strip Qwen 3's <think>...</think> blocks from response."""
+        # Remove <think>...</think> blocks (Qwen 3's reasoning)
+        clean = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        return clean.strip()
     
     def quick_validate(self, game_code: str) -> Tuple[bool, str]:
         """Quick validation without LLM - structural checks on JS, HTML, CSS."""

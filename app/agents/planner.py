@@ -55,6 +55,9 @@ Game state flow: START → PLAYING → PAUSED → GAME_OVER
 - Be SPECIFIC with numbers (speed=300, lives=3, points=+10)
 - NO code, NO examples - just plain text instructions
 - 100-200 words max
+- ZERO explanations, ZERO reasoning, ZERO thinking — output ONLY the structured plan
+
+/no_think
 """
 
 # Game-specific mandatory constraints injected into plans

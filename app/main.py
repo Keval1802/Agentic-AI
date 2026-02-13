@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from queue import Queue
 from threading import Lock
+import webbrowser
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
@@ -270,33 +271,47 @@ async def generate_game(request: GameRequest):
             chain.include_visual_testing = original_visual
             chain.on_progress = None
         
-        if not result.success:
+        if not result.success and not result.game_code:
+            # Only return error if there is truly NO code at all
             return GameResponse(
                 success=False,
-                error=result.error or "Failed to generate game",
+                error=result.error or "Failed to generate game - no code produced",
                 steps_completed=result.steps_completed
             )
+        
+        # If we have code (even on failure), save it to the output folder
+        if not result.success and result.game_code:
+            print(f"⚠️ Pipeline had errors but produced {len(result.game_code)} chars of code. Saving anyway.")
         
         # Create game folder with 3 separate files
         game_id = f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         game_folder = GENERATED_DIR / game_id
         game_folder.mkdir(parents=True, exist_ok=True)
         
-        # Check if multi-file output is available
-        if result.game_files and result.game_files.get('html'):
-            # Save 3 separate files
-            with open(game_folder / "index.html", "w", encoding="utf-8") as f:
-                f.write(result.game_files['html'])
-            with open(game_folder / "style.css", "w", encoding="utf-8") as f:
-                f.write(result.game_files.get('css', '/* No styles */'))
-            with open(game_folder / "script.js", "w", encoding="utf-8") as f:
-                f.write(result.game_files.get('js', '// No script'))
-            print(f"📁 Saved game to folder: {game_folder}")
-        else:
-            # Fallback: save combined HTML as before
-            with open(game_folder / "index.html", "w", encoding="utf-8") as f:
-                f.write(result.game_code)
-            print(f"📁 Saved combined HTML to: {game_folder}/index.html")
+        # Combine all parts into a single HTML file (User Request: "all output means html,css and js in one .html form")
+        combined_html = result.game_code
+        
+        # If we have separate parts, use parser to combine them properly
+        if result.game_files:
+            html_part = result.game_files.get('html', '')
+            css_part = result.game_files.get('css', '')
+            js_part = result.game_files.get('js', '')
+            # Use chain parser to recombine (handles script injection)
+            combined_html = chain.parser._combine(html_part, css_part, js_part)
+            
+        # Save as single index.html
+        with open(game_folder / "index.html", "w", encoding="utf-8") as f:
+            f.write(combined_html)
+            
+        print(f"📁 Saved single-file game to: {game_folder}")
+        
+        # Direct render: Open in browser
+        game_url = f"http://127.0.0.1:8000/static/generated/{game_id}/index.html"
+        print(f"🌍 Opening game in browser: {game_url}")
+        try:
+            webbrowser.open(game_url)
+        except Exception as e:
+            print(f"⚠️ Failed to open browser: {e}")
         
         # Build validation info
         validation_info = None
