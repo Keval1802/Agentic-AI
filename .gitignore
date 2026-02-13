@@ -31,6 +31,9 @@ Untitled-1.txt
 # Temp game files
 temp_games/
 
+# Fine-tuning
+training/
+
 # Logs
 logs/
 
