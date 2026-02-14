@@ -202,7 +202,7 @@ class ValidatorAgent:
                         
         return structure
 
-    def validate(self, game_code: str) -> ValidationResult:
+    def validate(self, game_code: str, contract: str = "") -> ValidationResult:
         """Validate ALL parts: HTML structure, CSS styling, and JavaScript logic."""
         # Extract all 3 parts
         js_code = self._extract_js(game_code)
@@ -214,6 +214,11 @@ class ValidatorAgent:
         html_issues = self._validate_html(html_code)
         css_issues = self._validate_css(css_code)
 
+        # === CONTRACT ADHERENCE CHECK ===
+        contract_issues = []
+        if contract:
+            contract_issues = self._validate_contract(js_code, contract)
+
         # === LINE-BY-LINE SCAN (deterministic) ===
         line_issues = []
         line_issues += self._scan_placeholder_lines(html_code, "html")
@@ -224,7 +229,7 @@ class ValidatorAgent:
         llm_result = self._llm_validation(game_code)
         
         # Combine ALL issues
-        all_issues = js_issues + html_issues + css_issues + line_issues + llm_result.get('issues', [])
+        all_issues = js_issues + html_issues + css_issues + contract_issues + line_issues + llm_result.get('issues', [])
         
         # Strict Mode: Zero Tolerance for both Critical Errors AND Warnings
         # User feedback: "warning is also not acceptable"
@@ -280,6 +285,70 @@ class ValidatorAgent:
 
         return issues
     
+    def _validate_contract(self, js_code: str, contract: str) -> List[Dict]:
+        """Check if code follows the Planner's function/variable contract.
+        
+        Only flags MISSING contract functions as critical issues.
+        Hallucinated functions are logged but NOT flagged — the Coder
+        needs freedom to create helpers the planner didn't foresee.
+        """
+        import re
+        issues = []
+        
+        if not contract or not js_code:
+            return issues
+        
+        # === Parse contract for expected function names ===
+        contract_functions = set()
+        for line in contract.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or line.startswith('GLOBAL') or line.startswith('CLASS') or line.startswith('FUNCTIONS'):
+                continue
+            fn_match = re.match(r'^\s*(?:this\.)?(\w+)\s*\(', line)
+            if fn_match:
+                fn_name = fn_match.group(1)
+                if fn_name not in ('let', 'const', 'var', 'if', 'for', 'while', 'return', 'new'):
+                    contract_functions.add(fn_name)
+        
+        if not contract_functions:
+            return issues
+        
+        # === Extract actual function/method names from JS code ===
+        defined_methods = set(re.findall(
+            r'^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{', js_code, re.MULTILINE
+        ))
+        defined_methods.update(re.findall(
+            r'(?:const|let|var)\s+(\w+)\s*=\s*(?:function|\([^)]*\)\s*=>)', js_code
+        ))
+        noise = {'if', 'for', 'while', 'switch', 'catch', 'return', 'new', 'else', 'function'}
+        defined_methods -= noise
+        
+        # === Only flag MISSING contract functions (critical) ===
+        missing = contract_functions - defined_methods
+        for fn in sorted(missing):
+            issues.append({
+                'severity': 'critical',
+                'location': fn,
+                'issue': f"CONTRACT BREACH: Function '{fn}' is in the contract but MISSING from code",
+                'fix': f"Implement the '{fn}' function/method as specified in the contract"
+            })
+        
+        # === Log hallucinated functions (info only, NOT issues) ===
+        if len(contract_functions) >= 3:
+            hallucinated = defined_methods - contract_functions
+            safe_names = {'constructor', 'render', 'init', 'setup', 'main', 'animate',
+                          'resize', 'destroy', 'dispose', 'reset', 'toString', 'valueOf'}
+            hallucinated -= safe_names
+            if hallucinated:
+                print(f"ℹ️ Contract Info: {len(hallucinated)} extra functions not in contract (OK): {sorted(hallucinated)}")
+        
+        if missing:
+            print(f"📋 Contract Check: {len(missing)} MISSING functions: {sorted(missing)}")
+        else:
+            print(f"✅ Contract Check: All {len(contract_functions)} contract functions found in code")
+        
+        return issues
+
     def _validate_js(self, js_code: str) -> List[Dict]:
         """Validate JavaScript code. ReferenceError = ZERO TOLERANCE."""
         issues = []

@@ -31,6 +31,7 @@ class GraphState(TypedDict):
     # Input
     game_plan: str
     design_spec: str
+    contract: str  # Planner's variable/function contract + pseudo-code logic
     
     # Code state - unified memory for all files
     current_code: str  # Combined HTML (for backwards compatibility)
@@ -107,13 +108,13 @@ class CoderValidatorGraph:
     
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph state graph."""
-        # Create graph with state schema
         graph = StateGraph(GraphState)
         
         # Add nodes
         graph.add_node("coder", self._coder_node)
         graph.add_node("validator", self._validator_node)
         graph.add_node("patcher", self._patcher_node)
+        graph.add_node("reset_coder", self._reset_coder_node)
         
         # Set entry point
         graph.set_entry_point("coder")
@@ -128,12 +129,15 @@ class CoderValidatorGraph:
             {
                 "complete": END,
                 "patch": "patcher",
+                "reset_coder": "reset_coder",
                 "failed": END
             }
         )
         
         # Patcher loops back to validator
         graph.add_edge("patcher", "validator")
+        # Reset coder also goes to validator
+        graph.add_edge("reset_coder", "validator")
         
         return graph
     
@@ -307,7 +311,8 @@ class CoderValidatorGraph:
         try:
             game_code = self.coder.code(
                 state["game_plan"],
-                state.get("design_spec", "")
+                state.get("design_spec", ""),
+                contract=state.get("contract", "")
             )
             
             if not game_code or len(game_code) < 500:
@@ -356,7 +361,7 @@ class CoderValidatorGraph:
             current_code = state["current_code"]
             
             # Run validation
-            result = self.validator.validate(current_code)
+            result = self.validator.validate(current_code, contract=state.get("contract", ""))
             
             # Track issue count for stall detection
             current_issue_count = len(result.issues)
@@ -411,8 +416,11 @@ class CoderValidatorGraph:
     
     def _patcher_node(self, state: GraphState) -> dict:
         """
-        Patcher Node: Fix identified issues in the code.
-        Uses code_memory to maintain full context across iterations.
+        Patcher Node: Fix identified issues using Search/Replace diffs.
+        
+        Primary strategy: LLM outputs <<<< SEARCH / ==== / >>>> REPLACE blocks
+        that are applied as precise string replacements on the master code.
+        Fallback: Full-file fix_code() if no patches can be applied.
         """
         iteration = state.get("iteration", 1)
         issues = state.get("issues", [])
@@ -432,7 +440,7 @@ class CoderValidatorGraph:
             )
 
         try:
-            # Apply deterministic line fixes before LLM patching
+            # ========== STEP 0: Deterministic placeholder fixes ==========
             try:
                 code_memory, issues, applied = self._apply_placeholder_line_fixes(code_memory, issues)
                 if applied:
@@ -447,21 +455,25 @@ class CoderValidatorGraph:
             except Exception as placeholder_err:
                 self._notify(f"⚠️ [Patcher] Placeholder fix error (non-fatal): {placeholder_err}")
 
-            # === CRITIQUE-LOOP: GLOBAL REJECTION CHECK ===
-            # Check if Validator rejected code entirely (Structured Audit)
-            audit_rejection = next((i for i in issues if i.get('location') == 'General Audit' and 'REJECTED' in i.get('issue', '')), None)
+            # ========== STEP 1: Audit Rejection → full rewrite ==========
+            audit_rejection = next(
+                (i for i in issues if i.get('location') == 'General Audit' and 'REJECTED' in i.get('issue', '')),
+                None
+            )
             
             if audit_rejection:
                 fix_directive = audit_rejection.get('fix', 'Resolve critical logic flaws.')
-                self._notify(f"🚨 [Patcher] AUDIT REJECTION received. Bypass surgical patch.")
-                self._notify(f"   📝 Directive: {fix_directive}")
+                self._notify(f"🚨 [Patcher] AUDIT REJECTION. Full rewrite triggered.")
                 
-                # Force global fix with the directive
-                fix_instructions = f"## AUDITOR REJECTION:\nThe code was REJECTED. You must fix this CRITICAL issue:\n\n{fix_directive}\n\nReview the logic from scratch and rewrite the broken parts."
+                fix_instructions = (
+                    f"## AUDITOR REJECTION:\n"
+                    f"The code was REJECTED. Fix this CRITICAL issue:\n\n"
+                    f"{fix_directive}\n\n"
+                    f"Review the logic from scratch and rewrite the broken parts."
+                )
                 
-                # Reconstruct full code
                 full_code = current_code
-                from ..parsers.game_parser import GameCodeParser  # Ensure import
+                from ..parsers.game_parser import GameCodeParser
                 if code_memory.get("html") or code_memory.get("css") or code_memory.get("js"):
                     parser = GameCodeParser()
                     full_code = parser._combine(
@@ -470,7 +482,7 @@ class CoderValidatorGraph:
                         code_memory.get("js", ""),
                     )
                 
-                new_code = self.coder.fix_code(full_code, fix_instructions)
+                new_code = self.coder.fix_code(full_code, fix_instructions, contract=state.get("contract", ""))
                 
                 updated_memory = self._extract_code_parts(new_code)
                 updated_memory = self._merge_code_memory(code_memory, updated_memory)
@@ -490,172 +502,82 @@ class CoderValidatorGraph:
                     "messages": [f"🔧 Applied Audit Fixes (Global Rewrite)"]
                 }
 
-            # Extract function names from issues
-            function_names = self.patcher.extract_function_names_from_issues(issues)
-            
-            # === DEPENDENCY MAPPING (KEYHOLE FIX) ===
-            try:
-                from ..utils.dependency_mapper import DependencyMapper
-                # Use current JS to find dependencies
-                current_js = code_memory.get('js', '')
-                if not current_js:
-                     js_match = re.search(r'<script[^>]*>(.*?)</script>', current_code, re.DOTALL | re.IGNORECASE)
-                     current_js = js_match.group(1) if js_match else current_code
-
-                mapper = DependencyMapper(current_js)
-                dependent_functions = set()
+            # ========== STEP 2: Search/Replace Patching (PRIMARY) ==========
+            if issues:
+                self._notify(f"🔍 [Patcher] Using Search/Replace diff strategy for {len(issues)} issues...")
                 
-                # Find callers for each targeted function
-                for fn in function_names:
-                    callers = mapper.get_callers(fn)
-                    if callers:
-                        self._notify(f"🔗 [Patcher] Found callers of '{fn}': {callers}")
-                        dependent_functions.update(callers)
-                
-                # Add dependents to patch list if not already there
-                for dep in dependent_functions:
-                    if dep not in function_names:
-                        function_names.append(dep)
-                        # Add a synthetic issue so the patcher knows WHY it's patching this
-                        issues.append({
-                            'location': dep, 
-                            'issue': f"Dependency Update: Calls modified function(s). Check for signature mismatch.",
-                            'fix': "Update call arguments if needed."
-                        })
-                        self._notify(f"🔗 [Patcher] Added '{dep}' to patch list (Cascading Update)")
-
-            except Exception as dep_err:
-                self._notify(f"⚠️ [Patcher] Dependency mapping failed: {dep_err}")
-
-            # Filter out already fixed functions to avoid loops
-            new_functions = []
-            for fn in function_names:
-                signature = ""
-                for issue in issues:
-                    if fn in issue.get("location", ""):
-                        signature = self._issue_signature([issue])
-                        break
-                if fix_history.get(fn) != signature:
-                    new_functions.append(fn)
-            
-            if new_functions:
-                # Targeted function patching with SURGICAL PRECISION
-                self._notify(f"🎯 [Patcher] Surgically patching functions: {new_functions}")
-                
-                # Use code_memory for JavaScript context
-                current_js = code_memory.get('js', '')
-                if not current_js:
-                    # Try to extract from full code if memory empty
-                    js_match = re.search(r'<script[^>]*>(.*?)</script>', current_code, re.DOTALL | re.IGNORECASE)
-                    current_js = js_match.group(1) if js_match else current_code
-
-                # Map function names to their issues
-                issue_map = {}
-                for issue in issues:
-                    for fn in new_functions:
-                        if fn in issue.get('location', ''):
-                            issue_map[fn] = issue
-                            break
-                
-                # EXTRACT CONTEXT for surgical fix
-                # This prevents the LLM from hallucinating variables or losing references
-                context = self._get_code_context(code_memory)
-
-                patched_count = 0
-                
-                # Iterate and patch each function
-                for fn in new_functions:
-                    # Extract function data to get precise location and body
-                    func_data = self.patcher.extract_function(current_js, fn)
-                    
-                    if not func_data:
-                        self._notify(f"⚠️ [Patcher] Function '{fn}' not found in code, skipping.")
-                        continue
-                        
-                    # Prepare specific instructions
-                    issue = issue_map.get(fn, {})
-                    fix_instructions = f"Fix {fn}: {issue.get('issue', 'Fix logic error')} -> {issue.get('fix', 'Implement correctly')}"
-                    
-                    # Call LLM with Context-Aware Surgical Fix
-                    try:
-                        patched_body = self.coder.fix_code(
-                             func_data.body, 
-                             fix_instructions, 
-                             context=context
-                        )
-                        
-                        # Clean up response (remove markdown and strict whitespace)
-                        patched_body = patched_body.replace("```javascript", "").replace("```", "").strip()
-                        
-                        # INTELLIGENT WRAPPING: Check if LLM returned the full function or just body
-                        # Check for function-like patterns at start (ignoring comments/whitespace)
-                        # We use a simple regex to check if the code *starts* with a function definition
-                        clean_start = re.sub(r'//.*?\n|/\*.*?\*/', '', patched_body, flags=re.DOTALL).strip()
-                        is_full_function = any(clean_start.startswith(kw) for kw in ['function', 'async', 'class', 'static', 'get ', 'set ', func_data.name])
-                        
-                        if is_full_function:
-                            new_function = patched_body
-                        else:
-                            # It's just the body, so wrap it
-                            new_function = f"{func_data.signature} {{\n{patched_body}\n}}"
-                        
-                        # Apply patch using exact string replacement
-                        if func_data.full_match in current_js:
-                            current_js = current_js.replace(func_data.full_match, new_function)
-                            patched_count += 1
-                            self._notify(f"✅ [Patcher] Fixed '{fn}'")
-                            
-                            # Update fix history
-                            fix_history[fn] = self._issue_signature([issue])
-                            
-                    except Exception as e:
-                        print(f"⚠️ [Patcher] Failed to patch {fn}: {e}")
-
-                if patched_count > 0:
-                    # Update code memory
-                    code_memory["js"] = current_js
-                    
-                    # Rebuild full code
-                    from ..parsers.game_parser import GameCodeParser
+                # Reconstruct full code from memory
+                full_code = current_code
+                from ..parsers.game_parser import GameCodeParser
+                if code_memory.get("html") or code_memory.get("css") or code_memory.get("js"):
                     parser = GameCodeParser()
-                    final_code = parser._combine(
+                    full_code = parser._combine(
                         code_memory.get("html", ""),
                         code_memory.get("css", ""),
                         code_memory.get("js", ""),
                     )
+                
+                # Call LLM with search/replace prompt
+                try:
+                    patch_response = self.coder.patch_code(
+                        full_code=full_code,
+                        issues=issues,
+                        contract=state.get("contract", "")
+                    )
                     
-                    return {
-                        "current_code": final_code,
-                        "code_memory": code_memory,
-                        "fix_history": fix_history,
-                        "iteration": iteration + 1,
-                        "status": "validating",
-                        "messages": [f"🔧 Surgically patched {patched_count} functions"]
-                    }
-                else:
-                    self._notify("⚠️ [Patcher] Surgical patch failed (functions not found), falling back to global fix.")
-            
-            # Fallback (or if no specific functions identified): Global Fix
-            self._notify(f"🔧 [Patcher] Applying global fixes to {len(issues)} issues...")
+                    # Apply the patches
+                    from ..utils.code_patcher import apply_search_replace_patch
+                    patched_code, applied_count, failed_count = apply_search_replace_patch(
+                        full_code, patch_response
+                    )
+                    
+                    self._notify(
+                        f"📋 [Patcher] Search/Replace: {applied_count} applied, {failed_count} failed"
+                    )
+                    
+                    if applied_count > 0:
+                        # Update code memory from patched result
+                        extracted_parts = self._extract_code_parts(patched_code)
+                        updated_memory = self._merge_code_memory(code_memory, extracted_parts)
+                        
+                        parser = GameCodeParser()
+                        final_code = parser._combine(
+                            updated_memory.get("html", ""),
+                            updated_memory.get("css", ""),
+                            updated_memory.get("js", ""),
+                        )
+                        
+                        return {
+                            "current_code": final_code,
+                            "code_memory": updated_memory,
+                            "fix_history": fix_history,
+                            "iteration": iteration + 1,
+                            "status": "validating",
+                            "messages": [f"🔧 Applied {applied_count} search/replace patches"]
+                        }
+                    else:
+                        self._notify("⚠️ [Patcher] No search/replace patches applied, falling back to full-file fix...")
+                        
+                except Exception as patch_err:
+                    self._notify(f"⚠️ [Patcher] Search/Replace error: {patch_err}, falling back to full-file fix...")
+
+            # ========== STEP 3: Fallback — full-file fix_code ==========
+            self._notify(f"🔧 [Patcher] Fallback: Applying full-file fix for {len(issues)} issues...")
             
             fix_instructions = self._format_fix_instructions(issues)
             
-            # Inject Stall Warning to break loops
+            # Inject stall warning to break loops
             stall_count = state.get("stall_count", 0)
             if stall_count > 0:
                 fix_instructions = (
                     f"## ⚠️ REPEATED FAILURE WARNING ({stall_count} attempts):\n"
-                    f"You have failed to fix these issues multiple times.\n"
-                    f"Your previous fixes were ineffective or reverted.\n"
-                    f"YOU MUST TRY A DRASTICALLY DIFFERENT APPROACH.\n"
-                    f"If you were being conservative, BE BOLD.\n"
-                    f"If you were using a library, try manual implementation.\n\n"
+                    f"Your previous fixes were ineffective.\n"
+                    f"YOU MUST TRY A DRASTICALLY DIFFERENT APPROACH.\n\n"
                     + fix_instructions
                 )
             
-            # Reconstruct full code for context
             full_code = current_code
-            from ..parsers.game_parser import GameCodeParser  # Ensure import
+            from ..parsers.game_parser import GameCodeParser
             if code_memory.get("html") or code_memory.get("css") or code_memory.get("js"):
                 parser = GameCodeParser()
                 full_code = parser._combine(
@@ -664,32 +586,27 @@ class CoderValidatorGraph:
                     code_memory.get("js", ""),
                 )
             
-            # Use improved global fix (stable prompt)
-            new_code = self.coder.fix_code(full_code, fix_instructions)
+            new_code = self.coder.fix_code(full_code, fix_instructions, contract=state.get("contract", ""))
             
-            # Update code_memory
             extracted_parts = self._extract_code_parts(new_code)
             
-            # DEBUG: Check if we actually got anything
             if not any(extracted_parts.values()):
-                self._notify(f"⚠️ [Patcher] Global Fix returned no valid code blocks! Raw length: {len(new_code)}")
-                # Fallback: Try to use new_code as a single file if it looks like HTML
+                self._notify(f"⚠️ [Patcher] Fallback returned no valid code! Raw length: {len(new_code)}")
                 if "<html" in new_code.lower():
-                     extracted_parts["html"] = new_code
-                     self._notify("⚠️ [Patcher] Used raw output as HTML file.")
+                    extracted_parts["html"] = new_code
             
             updated_memory = self._merge_code_memory(code_memory, extracted_parts)
             
-            # Check if effective change happened
+            # Check for effective change
             changes = []
             if len(updated_memory.get('js','')) != len(code_memory.get('js','')): changes.append('JS')
             if len(updated_memory.get('html','')) != len(code_memory.get('html','')): changes.append('HTML')
             if len(updated_memory.get('css','')) != len(code_memory.get('css','')): changes.append('CSS')
             
             if not changes:
-                 self._notify("⚠️ [Patcher] Global Fix resulted in NO CHANGES. LLM output ignored?")
+                self._notify("⚠️ [Patcher] Fallback resulted in NO CHANGES.")
             else:
-                 self._notify(f"✅ [Patcher] Global Fix changed: {', '.join(changes)}")
+                self._notify(f"✅ [Patcher] Fallback changed: {', '.join(changes)}")
 
             parser = GameCodeParser()
             new_code = parser._combine(
@@ -703,14 +620,77 @@ class CoderValidatorGraph:
                 "code_memory": updated_memory,
                 "iteration": iteration + 1,
                 "status": "validating",
-                "messages": [f"🔧 Applied global fixes"]
+                "messages": [f"🔧 Applied fallback fixes"]
             }
                 
         except Exception as e:
             return {
                 "iteration": iteration + 1,
-                "status": "validating",  # Continue anyway
+                "status": "validating",
                 "messages": [f"⚠️ Patcher error: {str(e)}"],
+                "error": str(e)
+            }
+    
+    def _reset_coder_node(self, state: GraphState) -> dict:
+        """
+        Circuit Breaker Node: Wipe poisoned context and regenerate from scratch.
+        
+        Called when the patcher has failed repeatedly (stall_count >= 2, iteration >= 3).
+        Uses the original game_plan and contract to produce a fresh codebase.
+        """
+        self._notify("🧹 [Reset] Wiping context and regenerating from original plan...")
+        
+        game_plan = state.get("game_plan", "")
+        design_spec = state.get("design_spec", "")
+        contract = state.get("contract", "")
+        
+        try:
+            # Add failure context so the coder knows what went wrong
+            reset_plan = (
+                f"{game_plan}\n\n"
+                f"## ⚠️ REGENERATION NOTICE:\n"
+                f"The previous code generation attempt failed after {state.get('iteration', 0)} "
+                f"patching iterations. The patcher could not fix the bugs.\n"
+                f"Generate a CLEAN, COMPLETE implementation from scratch.\n"
+                f"Do NOT repeat the same mistakes."
+            )
+            
+            new_code = self.coder.code(reset_plan, design_spec, contract=contract)
+            
+            if not new_code or len(new_code) < 500:
+                self._notify("⚠️ [Reset] Regenerated code too short. Keeping previous code.")
+                return {
+                    "iteration": 1,  # Reset counter
+                    "stall_count": 0,
+                    "fix_history": {},
+                    "status": "validating",
+                    "messages": ["⚠️ Reset coder returned no valid code"]
+                }
+            
+            code_memory = self._extract_code_parts(new_code)
+            
+            self._notify(f"✅ [Reset] Fresh code generated: {len(new_code)} chars")
+            
+            return {
+                "current_code": new_code,
+                "code_memory": code_memory,
+                "iteration": 1,  # Reset counter to give fresh code a fair chance
+                "stall_count": 0,
+                "previous_issue_count": 999999,
+                "previous_issue_signature": None,
+                "previous_score": -1,
+                "fix_history": {},
+                "status": "validating",
+                "messages": ["🧹 Circuit Breaker: Fresh code generated from original plan"]
+            }
+            
+        except Exception as e:
+            self._notify(f"⚠️ [Reset] Error: {e}")
+            return {
+                "iteration": 1,
+                "stall_count": 0,
+                "status": "validating",
+                "messages": [f"⚠️ Reset error: {str(e)}"],
                 "error": str(e)
             }
     
@@ -761,52 +741,60 @@ class CoderValidatorGraph:
             
         return context_str
 
-    def _should_continue(self, state: GraphState) -> Literal["complete", "patch", "failed"]:
+    def _should_continue(self, state: GraphState) -> Literal["complete", "patch", "reset_coder", "failed"]:
         """
-        Decide whether to continue patching, complete, or fail.
+        Decide whether to continue patching, reset, complete, or fail.
+        
+        Circuit Breaker: After 3 failed patcher iterations, route to reset_coder
+        to wipe context and regenerate from the original plan.
         
         Returns:
             - "complete": Validation passed (0 issues)
             - "patch": Continue fixing issues
+            - "reset_coder": Wipe and regenerate (circuit breaker triggered)
             - "failed": Max iterations or stalls reached
         """
-        # Check for validation success
+        # 1. Success: Validation passed
         if state.get("is_valid", False):
             self._notify(f"✅ [Graph] Validation PASSED!")
             return "complete"
         
-        # Check for fatal errors
+        # 2. Fatal error
         if state.get("status") == "failed":
             self._notify(f"❌ [Graph] Pipeline failed: {state.get('error', 'Unknown error')}")
             return "failed"
         
-        # Check iteration limit
         iteration = state.get("iteration", 1)
-        # Default MAX_ITERATIONS is None, meaning infinite unless set. 
-        # But we should have a safety cap if not specified.
-        max_iter = state.get("max_iterations") or 15 
+        max_iter = state.get("max_iterations") or 15
         
+        # 3. Hard stop: max iterations
         if iteration >= max_iter:
-            self._notify(f"⚠️ [Graph] Max iterations ({max_iter}) reached. Stopping loop.")
-            return "complete"  # Return what we have
+            self._notify(f"⚠️ [Graph] Max iterations ({max_iter}) reached. Stopping.")
+            return "complete"
         
-        # Check if only warnings remain (no critical issues) — REFUSE TO ACCEPT
-        # User requested Zero Tolerance: "warning is also not acceptable"
+        # 4. Circuit Breaker: after 3 patcher iterations, wipe and retry
         issues = state.get("issues", [])
+        stall_count = state.get("stall_count", 0)
+        
+        if iteration >= 3 and stall_count >= 2 and issues:
+            self._notify(
+                f"🛑 [Graph] Circuit Breaker: {stall_count} stalls after {iteration} iterations. "
+                f"Wiping context and regenerating from original plan."
+            )
+            return "reset_coder"
+        
+        # 5. Zero Tolerance: any issues → keep patching
         if issues:
             self._notify(
-                f"⚠️ [Graph] {len(issues)} issue(s) remain. Refusing to accept (Zero Tolerance)."
+                f"⚠️ [Graph] {len(issues)} issue(s) remain. Continuing (Zero Tolerance)."
             )
-            # Proceed to patch
             return "patch"
         
-        # Check stall detection
-        stall_count = state.get("stall_count", 0)
+        # 6. Stall detection (no issues but not valid?)
         if stall_count >= self.MAX_STALLS:
-            self._notify(f"⚠️ [Graph] Stall detected ({stall_count} iterations without improvement). Stopping force-ably.")
-            return "complete"  # Return what we have as a last resort
+            self._notify(f"⚠️ [Graph] Stall limit ({stall_count}) reached. Stopping.")
+            return "complete"
         
-        # Continue patching
         return "patch"
     
     # ============ PUBLIC INTERFACE ============
@@ -815,6 +803,7 @@ class CoderValidatorGraph:
         self,
         game_plan: str,
         design_spec: str = "",
+        contract: str = "",
         max_iterations: Optional[int] = 15,
         thread_id: str = "default"
     ) -> GraphState:
@@ -824,6 +813,7 @@ class CoderValidatorGraph:
         Args:
             game_plan: The game specification from the planner
             design_spec: Visual design specification (optional)
+            contract: Planner's variable/function contract (optional)
             max_iterations: Maximum fix iterations before stopping (None = unlimited)
             thread_id: Thread ID for checkpointing
         
@@ -834,6 +824,7 @@ class CoderValidatorGraph:
         initial_state: GraphState = {
             "game_plan": game_plan,
             "design_spec": design_spec,
+            "contract": contract,
             "current_code": "",
             "game_files": {},
             "validation_result": None,

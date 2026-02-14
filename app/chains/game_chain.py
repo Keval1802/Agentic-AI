@@ -207,6 +207,17 @@ class GameDevelopmentChain:
                 message="Architecture created"
             ))
             
+            # Extract contract (variable/function map + pseudo-code) from plan
+            contract = ""
+            try:
+                contract = self.planner.extract_contract_from_plan(game_plan)
+                if contract:
+                    print(f"📋 Contract extracted: {len(contract)} chars")
+                else:
+                    print("⚠️ No contract found in plan (will use defaults)")
+            except Exception as contract_err:
+                print(f"⚠️ Contract extraction failed: {contract_err}")
+            
             # Save agent outputs for inspection
             # self._save_agent_outputs(user_request, game_plan, None)
 
@@ -266,6 +277,7 @@ class GameDevelopmentChain:
                 graph_result = self.coder_validator_graph.run(
                     game_plan=game_plan,
                     design_spec=design_spec or "",
+                    contract=contract,
                     max_iterations=None,
                     thread_id=thread_id
                 )

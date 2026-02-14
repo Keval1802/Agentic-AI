@@ -6,7 +6,7 @@ Fallback: Groq → Gemini
 """
 
 import os
-from typing import Optional
+from typing import Optional, List, Dict
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -25,6 +25,16 @@ ENHANCED_CODER_PROMPT = """You are a professional game developer. Generate a sin
 
 ## Design Specification:
 {design_spec}
+
+## MANDATORY CONTRACT (DO NOT INVENT NEW NAMES):
+{contract}
+
+Rules for the contract:
+- Use ONLY the variable names listed in the CONTRACT above
+- Use ONLY the function names listed in the CONTRACT above
+- Implement the LOGIC section as-is, translating pseudo-code to JavaScript
+- Do NOT rename, skip, or add functions not in the contract
+- If the contract is empty, use sensible defaults as described in the game plan
 
 ## OUTPUT REQUIREMENTS:
 - Return ONE HTML file only.
@@ -68,32 +78,15 @@ ENHANCED_CODER_PROMPT = """You are a professional game developer. Generate a sin
 8. Do not access a property after setting it to null in the same logical block.
 
 ## OUTPUT FORMAT:
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Game</title>
-<style>
-/* Full CSS here */
-</style>
-</head>
-<body>
-<div class="game-container">
-  <div id="startOverlay"><h1>Game Title</h1><button onclick="game.start()">Play</button></div>
-  <canvas id="gameCanvas"></canvas>
-  <div id="pauseOverlay" style="display:none;">Paused</div>
-  <div id="gameOverOverlay" style="display:none;">Game Over</div>
-</div>
-<script>
-/* Full JavaScript logic here */
-class Game {{
-  // Complete implementation
-}}
-const game = new Game();
-</script>
-</body>
-</html>
+- Start with <!DOCTYPE html> and end with </html>.
+- All CSS inside a single <style> tag in <head>.
+- All JavaScript inside a single <script> tag before </body>.
+- Import a Google Font via <link> in <head>.
+- Structure the HTML based on the GAME PLAN and CONTRACT — do NOT use a fixed template.
+- Include overlays for: start screen (with Play button), pause, and game over (with score + restart).
+- Use a <canvas> element for the game rendering.
+- Use element IDs that match the CONTRACT if provided.
+- Do NOT hardcode generic IDs like "startOverlay" or "gameOverOverlay" — use names from the contract.
 
 /no_think
 """
@@ -127,16 +120,55 @@ Your job is to correct or complete functions as described below.
 
 EXISTING CODE:
 {existing_code}
+
 FIX INSTRUCTIONS:
 {fix_instructions}
 
+CONTRACT (Reference — use ONLY these names, do NOT invent new ones):
+{contract}
+
 RULES:
-Modify only relevant parts.
-Keep all other code unchanged.
-Return ONE full HTML file starting with <!DOCTYPE html> and ending with </html>.
-No markdown, backticks, or commentary.
-ZERO explanations, ZERO reasoning, ZERO thinking — output the HTML file ONLY.
-Preserve ALL existing UI/UX styling — do NOT remove CSS, animations, gradients, fonts, or visual effects.
+- Fix ONLY the specific errors listed above. Do NOT rewrite unrelated code.
+- Keep all other code EXACTLY as-is.
+- Use ONLY the variable/function names from the CONTRACT.
+- Return ONE full HTML file starting with <!DOCTYPE html> and ending with </html>.
+- No markdown, backticks, or commentary.
+- ZERO explanations, ZERO reasoning, ZERO thinking — output the HTML file ONLY.
+- Preserve ALL existing UI/UX styling — do NOT remove CSS, animations, gradients, fonts, or visual effects.
+
+/no_think
+"""
+
+# Search/Replace diff-based patch prompt — Zero Tolerance mode
+SEARCH_REPLACE_PROMPT = """You are a precise code-patching agent. You must fix the bugs provided by the Validator.
+
+FULL GAME CODE:
+{full_code}
+
+BUGS TO FIX:
+{issues}
+
+CONTRACT (use ONLY these names):
+{contract}
+
+CRITICAL RULES:
+1. You MUST use the <<<< SEARCH and >>>> REPLACE format shown below.
+2. The <<<< SEARCH block MUST be an EXACT, character-for-character copy of the original code. Do not skip lines, do not change indentation, do not add comments.
+3. Do NOT wrap your output in markdown formatting (no ```html or ```javascript).
+4. Do NOT output the entire file. Only output the targeted blocks.
+5. You may output multiple blocks if there are multiple bugs.
+6. Keep fixes minimal — change ONLY what is broken.
+7. Preserve ALL styling, CSS, animations, and UI elements.
+
+FORMAT:
+
+<<<< SEARCH
+[exact old code, character for character]
+====
+[your fixed replacement code]
+>>>> REPLACE
+
+ZERO explanations, ZERO reasoning, ZERO commentary — patch blocks ONLY.
 
 /no_think
 """
@@ -180,11 +212,12 @@ class CoderAgent:
         self.prompt = ChatPromptTemplate.from_template(ENHANCED_CODER_PROMPT)
         self.parser = GameCodeParser()
 
-    def code(self, game_plan: str, design_spec: str = "") -> str:
+    def code(self, game_plan: str, design_spec: str = "", contract: str = "") -> str:
         """Generate full HTML game file."""
         messages = self.prompt.format_messages(
             game_plan=game_plan,
-            design_spec=design_spec or "Use clean, modern design with minimal CSS."
+            design_spec=design_spec or "Use clean, modern design with minimal CSS.",
+            contract=contract or "No contract provided — use sensible defaults from the game plan."
         )
         if self.verbose_logs:
             print(f"Invoking LLM ({self.model})...")
@@ -200,7 +233,7 @@ class CoderAgent:
             return self.code(combined_plan, design_spec)
         return self.code(game_plan, design_spec)
 
-    def fix_code(self, existing_code: str, fix_instructions: str, context: str = "") -> str:
+    def fix_code(self, existing_code: str, fix_instructions: str, context: str = "", contract: str = "") -> str:
         """Apply targeted or full-file code fixes."""
         if context:
             prompt = ChatPromptTemplate.from_template(FIX_FUNCTION_PROMPT)
@@ -213,7 +246,8 @@ class CoderAgent:
             prompt = ChatPromptTemplate.from_template(FIX_CODE_PROMPT)
             messages = prompt.format_messages(
                 existing_code=existing_code,
-                fix_instructions=fix_instructions
+                fix_instructions=fix_instructions,
+                contract=contract or "No contract — use existing names from the code."
             )
 
         if self.verbose_logs:
@@ -221,6 +255,35 @@ class CoderAgent:
         response = self.llm.invoke(messages)
         fixed_code = self._extract_content(response)
         return self._fix_formatting(fixed_code)
+
+    def patch_code(self, full_code: str, issues: List[Dict], contract: str = "") -> str:
+        """Generate SEARCH/REPLACE patch blocks for the given issues.
+        
+        Returns the raw LLM response containing <<<< SEARCH / ==== / >>>> REPLACE blocks.
+        The caller is responsible for parsing and applying these patches.
+        """
+        
+        # Format issues into a readable list
+        issue_text = ""
+        for idx, issue in enumerate(issues, 1):
+            loc = issue.get('location', 'Unknown')
+            problem = issue.get('issue', 'Unknown issue')
+            fix = issue.get('fix', 'Fix this')
+            issue_text += f"{idx}. [{loc}] {problem}\n   Fix: {fix}\n"
+        
+        prompt = ChatPromptTemplate.from_template(SEARCH_REPLACE_PROMPT)
+        messages = prompt.format_messages(
+            full_code=full_code,
+            issues=issue_text,
+            contract=contract or "No contract — use existing names from the code."
+        )
+        
+        if self.verbose_logs:
+            print(f"🔧 [Patcher] Requesting {len(issues)} search/replace patches...")
+        
+        response = self.llm.invoke(messages)
+        raw = self._extract_content(response)
+        return raw
 
     def _extract_content(self, response) -> str:
         """Safely extract model output and strip thinking tokens."""

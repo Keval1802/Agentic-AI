@@ -51,10 +51,46 @@ Game state flow: START → PLAYING → PAUSED → GAME_OVER
 - For chess: do NOT show "Lives" - use turn indicator and captured pieces
 - For physics games: specify gravity, friction, bounce values
 
+### [CONTRACT]
+List ALL variable names and function signatures the Coder MUST use.
+Format:
+GLOBAL VARIABLES:
+  let variableName = defaultValue
+
+CLASS PROPERTIES (this.*):
+  this.propertyName = defaultValue
+
+FUNCTIONS/METHODS:
+  functionName(params) — one-line description of what it does
+
+Rules for the contract:
+- Every function the game needs MUST be listed here
+- The Coder is FORBIDDEN from inventing new function names not in this list
+- Include constructor(), all game methods, all helper functions
+- Be exhaustive — missing a function here means the Coder won't implement it
+
+### [LOGIC]
+Write step-by-step PSEUDO-CODE for all complex game logic.
+The Coder will translate this 1:1 into JavaScript.
+Format each function's logic as:
+FUNCTION_NAME:
+  1. Step one
+  2. Step two
+  3. If condition → do X
+  4. Else → do Y
+
+Cover at minimum:
+- Game initialization logic
+- Main update/game loop logic  
+- Collision/interaction detection
+- Win/lose condition checks
+- AI opponent logic (if applicable)
+- Any complex state transitions
+
 ## RULES:
 - Be SPECIFIC with numbers (speed=300, lives=3, points=+10)
-- NO code, NO examples - just plain text instructions
-- 100-200 words max
+- NO code, NO examples - just plain text instructions and pseudo-code
+- The [CONTRACT] and [LOGIC] sections are MANDATORY
 - ZERO explanations, ZERO reasoning, ZERO thinking — output ONLY the structured plan
 
 /no_think
@@ -160,3 +196,44 @@ Please create an updated, more detailed game plan addressing this feedback.
                 break
         
         return plan
+
+    def extract_contract_from_plan(self, plan: str) -> str:
+        """Extract the [CONTRACT] and [LOGIC] sections from a plan.
+        
+        Returns them combined as a single string for the Coder/Validator to use.
+        """
+        import re
+        
+        contract = ""
+        logic = ""
+        
+        # Extract [CONTRACT] section
+        contract_match = re.search(
+            r'###?\s*\[CONTRACT\]\s*\n(.*?)(?=\n###?\s*\[|$)',
+            plan, re.DOTALL | re.IGNORECASE
+        )
+        if contract_match:
+            contract = contract_match.group(1).strip()
+        
+        # Extract [LOGIC] section
+        logic_match = re.search(
+            r'###?\s*\[LOGIC\]\s*\n(.*?)(?=\n###?\s*\[|$)',
+            plan, re.DOTALL | re.IGNORECASE
+        )
+        if logic_match:
+            logic = logic_match.group(1).strip()
+        
+        parts = []
+        if contract:
+            parts.append(f"## CONTRACT:\n{contract}")
+        if logic:
+            parts.append(f"## LOGIC:\n{logic}")
+        
+        result = "\n\n".join(parts)
+        if result:
+            print(f"📋 Planner: Extracted contract ({len(contract)} chars) + logic ({len(logic)} chars)")
+        else:
+            print("⚠️ Planner: No [CONTRACT] or [LOGIC] found in plan")
+        
+        return result
+

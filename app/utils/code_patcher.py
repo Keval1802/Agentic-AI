@@ -6,7 +6,80 @@ Provides surgical patching of JavaScript functions in HTML game files.
 import re
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
+
+
+def normalize_whitespace(text: str) -> str:
+    """Strips all whitespace/newlines for fuzzy comparison."""
+    return re.sub(r'\s+', '', text)
+
+
+def apply_search_replace_patch(original_code: str, patch_response: str) -> Tuple[str, int, int]:
+    """
+    Parse SEARCH/REPLACE blocks from LLM response and apply them to source code.
+    Uses progressive matching: exact first, then fuzzy whitespace match.
+    
+    Returns:
+        (patched_code, applied_count, failed_count)
+    """
+    # 1. Strip markdown code blocks if the LLM hallucinated them
+    patch_response = re.sub(r'```[a-z]*\n|```', '', patch_response)
+    
+    # 2. Extract the SEARCH and REPLACE blocks
+    pattern = r"<{4}\s*SEARCH\n(.*?)\n={4}\n(.*?)\n>{4}\s*REPLACE"
+    matches = list(re.finditer(pattern, patch_response, re.DOTALL))
+    
+    if not matches:
+        return original_code, 0, 0
+    
+    updated_code = original_code
+    applied = 0
+    failed = 0
+    
+    for match in matches:
+        search_block = match.group(1).strip()
+        replace_block = match.group(2).strip()
+        
+        if not search_block:
+            print("⚠️ Patch: Empty SEARCH block, skipping")
+            failed += 1
+            continue
+        
+        # Strategy A: Exact Match
+        if search_block in updated_code:
+            updated_code = updated_code.replace(search_block, replace_block, 1)
+            applied += 1
+            preview = search_block[:60].replace('\n', ' ')
+            print(f"✅ Patch Applied (exact): '{preview}...'")
+            continue
+        
+        # Strategy B: Fuzzy Whitespace Match
+        print("⚠️ Exact match failed. Attempting fuzzy whitespace match...")
+        normalized_search = normalize_whitespace(search_block)
+        
+        original_lines = updated_code.split('\n')
+        search_lines = search_block.split('\n')
+        window_size = len(search_lines)
+        found = False
+        
+        for i in range(len(original_lines)):
+            for j in range(i + 1, min(i + window_size + 3, len(original_lines) + 1)):
+                chunk = '\n'.join(original_lines[i:j])
+                if normalize_whitespace(chunk) == normalized_search:
+                    updated_code = updated_code.replace(chunk, replace_block, 1)
+                    applied += 1
+                    print(f"✅ Patch Applied (fuzzy): lines {i+1}-{j}")
+                    found = True
+                    break
+            if found:
+                break
+        
+        if not found:
+            preview = search_block[:80].replace('\n', ' ')
+            print(f"⚠️ Patch FAILED: SEARCH block not found: '{preview}...'")
+            failed += 1
+    
+    return updated_code, applied, failed
 
 
 @dataclass
